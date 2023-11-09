@@ -1,0 +1,3 @@
+module Another
+
+provide let anotherHello = "Hello from another file!"
