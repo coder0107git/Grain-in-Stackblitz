@@ -1,0 +1,42 @@
+/* grainc-flags --compilation-mode=runtime */
+module Memory
+
+include "runtime/gc" as GC
+from GC use { malloc, free, incRef, decRef }
+include "runtime/unsafe/wasmi32" as WasmI32
+from WasmI32 use { (+), (-), (<<), (==), (!=), ltU as (<) }
+
+provide { malloc, free, incRef, decRef }
+
+provide let copy = (dest, src, n) => {
+  let mut dest = dest
+  let mut src = src
+  let mut n = n
+  if (dest != src) {
+    if (dest < src) {
+      while (n != 0n) {
+        WasmI32.store8(dest, WasmI32.load8U(src, 0n), 0n)
+        dest += 1n
+        src += 1n
+        n -= 1n
+      }
+    } else {
+      while (n != 0n) {
+        n -= 1n
+        WasmI32.store8(dest + n, WasmI32.load8U(src + n, 0n), 0n)
+      }
+    }
+  }
+}
+
+provide let fill = (dest, c, n) => {
+  let mut dest = dest
+  let mut n = n
+  while (n != 0n) {
+    WasmI32.store8(dest, c, 0n)
+    dest += 1n
+    n -= 1n
+  }
+}
+
+provide primitive compare = "@wasm.memory_compare"

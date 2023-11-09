@@ -1,0 +1,7 @@
+module Main
+
+include "./another" as Another
+from Another use { anotherHello }
+
+print("Hello, world!")
+print(anotherHello)
