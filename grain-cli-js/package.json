@@ -34,7 +34,7 @@
   },
   "homepage": "https://github.com/grain-lang/grain#readme",
   "dependencies": {
-    "@grain/stdlib": "0.5.13",
+    "@grain/stdlib": "file:../../grain-stdlib-js/",
     "commander": "^8.1.0"
   },
   "devDependencies": {
