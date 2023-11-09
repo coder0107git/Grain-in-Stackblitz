@@ -1,0 +1,261 @@
+/**
+ * Utilities for working with the Char type.
+ *
+ * The Char type represents a single [Unicode scalar value](https://www.unicode.org/glossary/#unicode_scalar_value).
+ *
+ * @example include "char"
+ *
+ * @since 0.3.0
+ */
+
+module Char
+
+include "runtime/unsafe/wasmi32"
+include "runtime/unsafe/errors"
+include "runtime/dataStructures"
+from DataStructures use { tagSimpleNumber, tagChar, untagChar, allocateString }
+
+exception MalformedUtf8
+
+/**
+ * The minimum valid Unicode scalar value.
+ *
+ * @since 0.3.0
+ */
+provide let min = 0x0000
+/**
+ * The maximum valid Unicode scalar value.
+ *
+ * @since 0.3.0
+ */
+provide let max = 0x10FFFF
+
+/**
+ * Determines whether the given character code is a valid Unicode scalar value.
+ *
+ * @param charCode: The number to check
+ * @returns `true` if the number refers to a valid Unicode scalar value or `false` otherwise
+ *
+ * @since 0.3.0
+ */
+provide let isValid = charCode => {
+  charCode >= min &&
+    (charCode <= 0xD7FF || charCode >= 0xE000) &&
+    charCode <= max
+}
+
+/**
+ * Determines the Unicode scalar value for a character.
+ *
+ * @param char: The character
+ * @returns The Unicode scalar value for the given character
+ *
+ * @since 0.3.0
+ */
+@unsafe
+provide let code = (char: Char) => {
+  let usv = untagChar(char)
+
+  // This could save an instruction by combining the two tagging operations,
+  // though we stick with tagSimpleNumber for simplicity.
+  tagSimpleNumber(usv)
+}
+
+/**
+ * Creates a character from the given Unicode scalar value.
+ *
+ * @param usv: The Unicode scalar value
+ * @returns The character for the given Unicode scalar value
+ *
+ * @throws InvalidArgument(String): When the Unicode scalar value is invalid
+ *
+ * @since 0.3.0
+ */
+@unsafe
+provide let fromCode = (usv: Number) => {
+  from WasmI32 use { (-), (<<) }
+
+  if (!isValid(usv)) {
+    throw InvalidArgument("Invalid character code")
+  }
+
+  // usv is now guaranteed to be a simple number
+  let usv = WasmI32.fromGrain(usv)
+
+  // Here we use a math trick to avoid fully untagging and retagging.
+  // Simple numbers are represented as 2n + 1 and chars are represented as
+  // (2^8)n + 2. Quick reminder that shifting left is the equivalent of multiplying
+  // by 2
+  // 2^7(2n + 1) - (2^7 - 2) = (2^8)n + 2
+  let char = (usv << 7n) - 126n
+
+  WasmI32.toGrain(char): Char
+}
+
+/**
+ * Returns the next valid character by Unicode scalar value.
+ *
+ * @param char: The character
+ * @returns The next valid character by Unicode scalar value
+ *
+ * @throws Failure(String): When the input character is the maximum valid Unicode scalar value
+ *
+ * @since 0.3.0
+ */
+provide let succ = char => {
+  let codePoint = code(char)
+  if (codePoint == max) {
+    fail "no valid Unicode scalar value past U+10FFF"
+  } else if (codePoint == 0xD7FF) {
+    fromCode(0xE000)
+  } else {
+    fromCode(codePoint + 1)
+  }
+}
+
+/**
+ * Returns the previous valid character by Unicode scalar value.
+ *
+ * @param char: The character
+ * @returns The previous valid character by Unicode scalar value
+ *
+ * @throws Failure(String): When the input character is the minimum valid Unicode scalar value
+ *
+ * @since 0.3.0
+ */
+provide let pred = char => {
+  let codePoint = code(char)
+  if (codePoint == min) {
+    fail "no valid Unicode scalar value below U+0000"
+  } else if (codePoint == 0xE000) {
+    fromCode(0xD7FF)
+  } else {
+    fromCode(codePoint - 1)
+  }
+}
+
+/**
+ * Converts the given character to a string.
+ *
+ * @param char: The character to convert
+ * @returns A string containing the given character
+ *
+ * @since 0.3.0
+ */
+@unsafe
+provide let toString = (char: Char) => {
+  from WasmI32 use {
+    (+),
+    (-),
+    (*),
+    (&),
+    (|),
+    (>>>),
+    ltU as (<),
+    gtU as (>),
+    leU as (<=),
+  }
+
+  let usv = untagChar(char)
+
+  let result = if (usv < 0x80n) {
+    let string = allocateString(1n)
+    WasmI32.store8(string, usv, 8n)
+    WasmI32.toGrain(string): String
+  } else {
+    let mut count = 0n
+    let mut offset = 0n
+    if (usv <= 0x07FFn) {
+      count = 1n
+      offset = 0xC0n
+    } else if (usv <= 0xFFFFn) {
+      count = 2n
+      offset = 0xE0n
+    } else {
+      count = 3n
+      offset = 0xF0n
+    }
+    let string = allocateString(count + 1n)
+    WasmI32.store8(string, (usv >>> 6n * count) + offset, 8n)
+
+    let mut n = 0n
+    while (count > 0n) {
+      n += 1n
+      let temp = usv >>> 6n * (count - 1n)
+      WasmI32.store8(string + n, 0x80n | temp & 0x3Fn, 8n)
+      count -= 1n
+    }
+
+    WasmI32.toGrain(string): String
+  }
+
+  result
+}
+
+/**
+ * Checks if the first character is less than the second character by Unicode scalar value.
+ *
+ * @param x: The first character
+ * @param y: The second character
+ * @returns `true` if the first character is less than the second character or `false` otherwise
+ *
+ * @since v0.6.0
+ */
+@unsafe
+provide let (<) = (x: Char, y: Char) => {
+  from WasmI32 use { (<) }
+  let x = WasmI32.fromGrain(x)
+  let y = WasmI32.fromGrain(y)
+  x < y
+}
+
+/**
+ * Checks if the first character is less than or equal to the second character by Unicode scalar value.
+ *
+ * @param x: The first character
+ * @param y: The second character
+ * @returns `true` if the first character is less than or equal to the second character or `false` otherwise
+ *
+ * @since v0.6.0
+ */
+@unsafe
+provide let (<=) = (x: Char, y: Char) => {
+  from WasmI32 use { (<=) }
+  let x = WasmI32.fromGrain(x)
+  let y = WasmI32.fromGrain(y)
+  x <= y
+}
+
+/**
+ * Checks if the first character is greater than the second character by Unicode scalar value.
+ *
+ * @param x: The first character
+ * @param y: The second character
+ * @returns `true` if the first character is greater than the second character or `false` otherwise
+ *
+ * @since v0.6.0
+ */
+@unsafe
+provide let (>) = (x: Char, y: Char) => {
+  from WasmI32 use { (>) }
+  let x = WasmI32.fromGrain(x)
+  let y = WasmI32.fromGrain(y)
+  x > y
+}
+
+/**
+ * Checks if the first character is greater than or equal to the second character by Unicode scalar value.
+ *
+ * @param x: The first character
+ * @param y: The second character
+ * @returns `true` if the first character is greater than or equal to the second character or `false` otherwise
+ *
+ * @since v0.6.0
+ */
+@unsafe
+provide let (>=) = (x: Char, y: Char) => {
+  from WasmI32 use { (>=) }
+  let x = WasmI32.fromGrain(x)
+  let y = WasmI32.fromGrain(y)
+  x >= y
+}
